@@ -59,7 +59,7 @@ const cFrameS = cFrameMS/1000; // Seconds per frame
 const cBoostDist = 5000; // Distance within which walls boost you
 const cBoostPower = 20000; // Max boost for a one-sided grind
 const cDragExp = 2;//3 for a normal fluid
-const cRadixBuckets = 256;
+const cRadixShift = 11; //bitshift to group locations in buckets
 class TronRound{
 	constructor(ctx, seed, players, myname, aicount){
 		this.startmilli = performance.now();
@@ -102,14 +102,25 @@ class TronRound{
 			this.bike.push({x:sl.sx, y:sl.sy, d:sl.d, s:0, w1:sl.w1, w2:sl.w2, dead:false, energy:0, maxspeed:0});
 			this.ai.push(nai);
 		}
-		this.walls[0].push([0, 0, 300000, -1]);
-		this.walls[1].push([0, 0, 300000, -1]);
-		this.walls[0].push([300000, 0, 300000, -1]);
-		this.walls[1].push([300000, 0, 300000, -1]);
+		this.pushWall(0, [0, 0, 300000, -1]);
+		this.pushWall(1, [0, 0, 300000, -1]);
+		this.pushWall(0, [300000, 0, 300000, -1]);
+		this.pushWall(1, [300000, 0, 300000, -1]);
 		this.snapshots = [];
 		this.snapshot();
 		this.run = true;
 		window.requestAnimationFrame(this.drawframe.bind(this));
+	}
+	pushWall(d, w){
+		let idx = this.walls[d].length;
+		this.walls[d].push(w);
+		let bucket = w[0] >> cRadixShift;
+		let rw = this.radixWalls[d];
+		while(bucket >= rw.length){
+			rw.push([]);
+		}
+		rw[bucket].push(idx);
+		return idx;
 	}
 	generateRandomStart(bikeidx){
 		let sx = this.rand()%200000+50000;
@@ -118,15 +129,16 @@ class TronRound{
 		if(sx > 150000) d=2;
 		if(sy > 200000) d=1;
 		if(sy < 100000) d=3;
-		let w1 = 0;
+		let w1;
+		let w2;
 		if(d == 0 || d == 2){
 			w1 = 0;
-			this.walls[0].push([sy, sx, sx, bikeidx]);
+			w2 = this.pushWall(0, [sy, sx, sx, bikeidx]);
 		}else{
 			w1 = 1;
-			this.walls[1].push([sx, sy, sy, bikeidx]);
+			w2 = this.pushWall(1, [sx, sy, sy, bikeidx]);
 		}
-		return {sx:sx, sy:sy, w1:w1, d:d, w2:this.walls[w1].length-1};
+		return {sx:sx, sy:sy, w1:w1, d:d, w2:w2};
 	}
 	die(){
 		this.run = false;
@@ -146,7 +158,8 @@ class TronRound{
 			bike:window.structuredClone(this.bike),
 			nextPlayerInputIdx:window.structuredClone(this.nextPlayerInputIdx),
 			activeExplosions:window.structuredClone(this.activeExplosions),
-			ai:window.structuredClone(this.ai)
+			ai:window.structuredClone(this.ai),
+			radixWalls:window.structuredClone(this.radixWalls)
 		});
 		// prune excessive snapshots, but not the initial state
 		if(this.snapshots.length > 20){
@@ -162,6 +175,7 @@ class TronRound{
 		this.nextPlayerInputIdx = window.structuredClone(snap.nextPlayerInputIdx);
 		this.activeExplosions = window.structuredClone(snap.activeExplosions);
 		this.ai = window.structuredClone(snap.ai);
+		this.radixWalls = window.structuredClone(snap.radixWalls);
 	}
 	distance(x, y, d){
 		let retlarge = Infinity;
@@ -266,16 +280,14 @@ class TronRound{
 							// Destroy the lower end
 							if(activeEnd == 0){
 								// User is in the blast, get them a new line
-								wploc.w2 = this.walls[iter].length;
-								this.walls[iter].push([w[0], w[1], w[1], w[3]]);
+								wploc.w2 = this.pushWall(iter, [w[0], w[1], w[1], w[3]]);
 							}
 							w[1] = x+minorOffset;
 						}else if(upperendstate == 0){
 							// Destroy the upper end
 							if(activeEnd == 1){
 								// User is in the blast, get them a new line
-								wploc.w2 = this.walls[iter].length;
-								this.walls[iter].push([w[0], w[2], w[2], w[3]]);
+								wploc.w2 = this.pushWall(iter, [w[0], w[2], w[2], w[3]]);
 							}
 							w[2] = x-minorOffset;
 						}else{
@@ -284,7 +296,7 @@ class TronRound{
 								// Move the user's line reference to the new line which is about to get created
 								wploc.w2 = this.walls[iter].length;
 							}
-							this.walls[iter].push([w[0], x+minorOffset, w[2], w[3]]);
+							this.pushWall(iter, [w[0], x+minorOffset, w[2], w[3]]);
 							w[2] = x-minorOffset;
 						}
 					}
@@ -302,44 +314,62 @@ class TronRound{
 		let oldy = ploc.y;
 		// Move the user, extending their current wall
 		let currentWall = this.walls[ploc.w1][ploc.w2];
+		let lowbucketidx;
+		let highbucketidx;
 		// Extend Walls based on direction
 		if(ploc.d == 0){
+			lowbucketidx = ploc.x >> cRadixShift;
 			ploc.x = currentWall[2] += ploc.s;
+			highbucketidx = ploc.x >> cRadixShift;
 		}else if(ploc.d == 1){
+			highbucketidx = ploc.y >> cRadixShift;
 			ploc.y = currentWall[1] -= ploc.s;
+			lowbucketidx = ploc.y >> cRadixShift;
 		}else if(ploc.d == 2){
+			highbucketidx = ploc.x >> cRadixShift;
 			ploc.x = currentWall[1] -= ploc.s;
+			lowbucketidx = ploc.x >> cRadixShift;
 		}else{
+			lowbucketidx = ploc.y >> cRadixShift;
 			ploc.y = currentWall[2] += ploc.s;
+			highbucketidx = ploc.y >> cRadixShift;
 		}
 		let major1;
 		let major2;
 		let minor;
 		let testlist; // Walls we can collide with
+		let bucketlist;
 		if(ploc.w1 == 0){
 			//Heading Horizontal
 			major1 = oldx;
 			major2 = ploc.x;
 			minor = ploc.y;
 			testlist = this.walls[1];
+			bucketlist = this.radixWalls[1];
 		}else{
 			//Heading Vertical
 			major1 = oldy;
 			major2 = ploc.y;
 			minor = ploc.x;
 			testlist = this.walls[0];
+			bucketlist = this.radixWalls[0];
 		}
-		for(let twallidx = 0; twallidx < testlist.length; twallidx++){
-			let w = testlist[twallidx];
-			if(
-				((major1 < w[0] && major2 >= w[0]) || (major1 > w[0] && major2 <= w[0])) &&
-				(w[1] <= minor && w[2] >= minor)
-			){
-				// We have crossed this wall. Prepare to die.
-				if(ploc.w1 == 0){
-					this.explode(pidx, w[0], minor);
-				}else{
-					this.explode(pidx, minor, w[0]);
+		lowbucketidx = Math.max(0, lowbucketidx);
+		highbucketidx = Math.min(bucketlist.length-1, highbucketidx);
+		for(let bucketIdx = lowbucketidx; bucketIdx <= highbucketidx; bucketIdx++){
+			let bucket = bucketlist[bucketIdx];
+			for(let twallidx = 0; twallidx < bucket.length; twallidx++){
+				let w = testlist[bucket[twallidx]];
+				if(
+					((major1 < w[0] && major2 >= w[0]) || (major1 > w[0] && major2 <= w[0])) &&
+					(w[1] <= minor && w[2] >= minor)
+				){
+					// We have crossed this wall. Prepare to die.
+					if(ploc.w1 == 0){
+						this.explode(pidx, w[0], minor);
+					}else{
+						this.explode(pidx, minor, w[0]);
+					}
 				}
 			}
 		}
@@ -425,7 +455,7 @@ class TronRound{
 		//performance.measure("draw", "compute end", "draw end");
 	}
 	getBoostPower(bike){
-		let closestLower = cBoostDist;
+		let closestLower = -cBoostDist;
 		let closestUpper = cBoostDist;
 		let warry = this.walls[bike.w1];
 		let majorc;
@@ -437,17 +467,25 @@ class TronRound{
 			majorc = bike.x;
 			minorc = bike.y;
 		}
-		for(let wcheckidx = 0; wcheckidx < warry.length; wcheckidx++){
-			if(warry[wcheckidx][1] <= minorc && warry[wcheckidx][2] >= minorc && wcheckidx != bike.w2){
-				let woffset = majorc-warry[wcheckidx][0];
-				if(woffset < 0){
-					if(-woffset < closestLower) closestLower = -woffset;
-				}else{
-					if(woffset < closestUpper) closestUpper = woffset;
+		let bucketlist = this.radixWalls[bike.w1];
+		let lowbucketidx = Math.max(0, (minorc-cBoostDist)>>cRadixShift);
+		let highbucketidx = Math.min(bucketlist.length-1, (minorc+cBoostDist)>>cRadixShift);
+		for(let bucketidx = lowbucketidx; bucketidx <= highbucketidx; bucketidx++){
+			let bucket = bucketlist[bucketidx];
+			for(let wcheckidx = 0; wcheckidx < bucket.length; wcheckidx++){
+				let widx = bucket[wcheckidx];
+				let w = warry[widx];
+				if(w[1] <= minorc && w[2] >= minorc && widx != bike.w2){
+					let woffset = majorc-w[0];
+					if(woffset < 0){
+						if(woffset > closestLower) closestLower = woffset;
+					}else{
+						if(woffset < closestUpper) closestUpper = woffset;
+					}
 				}
 			}
 		}
-		return cBoostPower/cBoostDist*((cBoostDist-closestLower) + (cBoostDist-closestUpper));
+		return cBoostPower/cBoostDist*((cBoostDist+closestLower) + (cBoostDist-closestUpper));
 	}
 	drawframe(){
 		let tframe = this.getFrame();
@@ -491,11 +529,10 @@ class TronRound{
 					//let oldWall = this.walls[ploc.w1][ploc.w2];
 					ploc.w1 ^= 1; //alternate horizontal and vertical
 					if(ploc.w1 == 0){
-						this.walls[0].push([ploc.y, ploc.x, ploc.x, pidx]);
+						ploc.w2 = this.pushWall(0, [ploc.y, ploc.x, ploc.x, pidx]);
 					}else{
-						this.walls[1].push([ploc.x, ploc.y, ploc.y, pidx]);
+						ploc.w2 = this.pushWall(1, [ploc.x, ploc.y, ploc.y, pidx]);
 					}
-					ploc.w2 = this.walls[ploc.w1].length-1;
 				}
 				// Drag multiplier based on walls
 				let boostPower = this.getBoostPower(ploc);
