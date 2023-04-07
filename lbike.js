@@ -57,7 +57,7 @@ const cTurnEnergyEfficiency = 0.9; // You conserve this amount of kinetic energy
 const cFrameMS = 5; // Milliseconds per frame
 const cFrameS = cFrameMS/1000; // Seconds per frame
 const cBoostDist = 5000; // Distance within which walls boost you
-const cBoostPower = 20000; // Max boost for a one-sided grind
+const cBoostPower = 40000; // Max boost for a one-sided grind
 const cDragExp = 2;//3 for a normal fluid
 const cRadixShift = 11; //bitshift to group locations in buckets
 class TronRound{
@@ -458,6 +458,7 @@ class TronRound{
 		let closestLower = -cBoostDist;
 		let closestUpper = cBoostDist;
 		let warry = this.walls[bike.w1];
+		let bucketlist = this.radixWalls[bike.w1];
 		let majorc;
 		let minorc;
 		if(bike.w1 == 0){
@@ -467,9 +468,8 @@ class TronRound{
 			majorc = bike.x;
 			minorc = bike.y;
 		}
-		let bucketlist = this.radixWalls[bike.w1];
-		let lowbucketidx = Math.max(0, (minorc-cBoostDist)>>cRadixShift);
-		let highbucketidx = Math.min(bucketlist.length-1, (minorc+cBoostDist)>>cRadixShift);
+		let lowbucketidx = Math.max(0, (majorc-cBoostDist)>>cRadixShift);
+		let highbucketidx = Math.min(bucketlist.length-1, (majorc+cBoostDist)>>cRadixShift);
 		for(let bucketidx = lowbucketidx; bucketidx <= highbucketidx; bucketidx++){
 			let bucket = bucketlist[bucketidx];
 			for(let wcheckidx = 0; wcheckidx < bucket.length; wcheckidx++){
