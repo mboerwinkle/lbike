@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LBike</title>
+</head>
+<body>
+<div>
+<form onsubmit="joingame(name,room)" action="javascript:void(0);">
+ <input type="text" id="name" placeholder="<Your Name>" value="" autocomplete=off required>
+ <input type="text" id="room" placeholder="<New or Existing Game Room>" value="" required>
+ <input type="submit" value="Join!">
+</form>
+<input type="color" onchange="updateSetColor()" id="colorpicker" value="#00ff00">
+<form onsubmit="startgame_button(ai_count)" action="javascript:void(0);">
+	<select id="ai_count">
+		<option value=0>0 AIs</option>
+		<option value=1>1 AI</option>
+		<option value=2>2 AIs</option>
+		<option value=3>3 AIs</option>
+		<option value=4>4 AIs</option>
+		<option value=5>5 AIs</option>
+		<option value=6>6 AIs</option>
+		<option value=7>7 AIs</option>
+		<option value=8>8 AIs</option>
+		<option value=16>16 AIs</option>
+		<option value=24>24 AIs</option>
+		<option value=32>32 AIs</option>
+		<option value=128>128 AIs</option>
+		<option value=512>512 AIs</option>
+		<option value=2048>2048 AIs</option>
+	</select>
+	<input type="submit" value="Start Game" id='lbike-start'>
+<form>
+</div>
+<div>
+<div style="background:#000;display:inline-block;width:640;height:480;overflow:hidden;">
+	<canvas width=640 height=480 id="lbike-canv" style="transform-origin:top;transform:perspective(675px) rotate3d(1, 0, 0, 70deg); image-rendering: crisp-edges;image-rendering: pixelated;"></canvas>
+</div>
+</div>
+<textarea id="lbike-status" cols="40" rows="10" readonly placeholder="No Status" autocomplete="off"></textarea>
+<script src="/poolsig/PoolSig.js"></script>
+<script src="/poolsig/PeerRtc.js"></script>
+<script src="lbike.js"></script>
+</body>
+</html>
