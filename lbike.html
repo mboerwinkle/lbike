@@ -35,13 +35,17 @@
 <form>
 </div>
 <div>
-<div style="background:#000;display:inline-block;width:640;height:480;overflow:hidden;">
+<!-- <div style="background:#000;display:inline-block;width:640;height:480;overflow:hidden;">
 	<canvas width=640 height=480 id="lbike-canv" style="transform-origin:top;transform:perspective(675px) rotate3d(1, 0, 0, 70deg); image-rendering: crisp-edges;image-rendering: pixelated;"></canvas>
+</div> -->
+<div style="background:#00a;display:inline-block;font-size:0;">
+	<canvas width=640 height=480 id="lbike-canv3d" style="image-rendering:crisp-edges;image-rendering:pixelated;"></canvas>
 </div>
 </div>
 <textarea id="lbike-status" cols="40" rows="10" readonly placeholder="No Status" autocomplete="off"></textarea>
 <script src="/poolsig/PoolSig.js"></script>
 <script src="/poolsig/PeerRtc.js"></script>
+<script src="glMat.js"></script>
 <script src="lbike.js"></script>
 </body>
 </html>

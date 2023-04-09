@@ -3,16 +3,47 @@ var myName;
 var pool = null;
 var rtcgroup = null;
 
-const canv = document.getElementById('lbike-canv');
+const canv3d = document.getElementById('lbike-canv3d');
 const statfield = document.getElementById('lbike-status');
 const but_start = document.getElementById('lbike-start');
 const colorpicker = document.getElementById('colorpicker');
 but_start.disabled = true;
-const ctx = canv.getContext("2d");
-ctx.fillRect(0, 0, canv.width, canv.height);
+const lbike_wall_frag = `#version 300 es
+precision highp float;
+out vec4 fragColor;
+void main(){
+	fragColor = vec4(1.0,1.0,1.0,1.0);
+}`;
+const lbike_vert = `#version 300 es
+precision highp float;
+uniform mat4 u_view_mat;
+in vec3 i_position;
+void main(){
+	gl_Position = u_view_mat * vec4(i_position, 1.0);
+}`;
+const glHints = {
+	alpha: true, //Avoid alpha:false, which can be expensive (From MDN best practices)
+	stencil: false,
+	antialias: true,
+//	desynchronized: true,
+}
+const ctx3d = canv3d.getContext('webgl2', glHints);
+if(null == ctx3d){
+	window.alert('WebGL2 required, but not available.');
+}
+const lbike_zplanes = new Float32Array([200, 5000000]);
+let lbike_cam_lens = new Mat4();
+lbike_cam_lens.gluPerspective(1.5, ctx3d.canvas.width/ctx3d.canvas.height, lbike_zplanes[0], lbike_zplanes[1]);//vfov was 1.22
+let vbuffer = ctx3d.createBuffer();//Create and bind vertex/normal buffer
+ctx3d.viewport(0, 0, ctx3d.canvas.width, ctx3d.canvas.height);//FIXME this line shouldnt be copied anywhere
+ctx3d.disable(ctx3d.DEPTH_TEST);
+ctx3d.disable(ctx3d.CULL_FACE);
+ctx3d.clearColor(0,0.5,0.5,1);
+const wallProg = new WGLProg(ctx3d, lbike_vert, lbike_wall_frag, ['u_view_mat'], ['i_position']);
+if(wallProg.inError()) console.warn("wallProg failed to build");
 var myColor = '#00ff00';
 document.onkeydown = function(evt){if(currentRound) currentRound.keydown(evt);};
-canv.addEventListener("pointerdown", (event) => {if(currentRound){currentRound.pointerdown(event);}});
+canv3d.addEventListener("pointerdown", (event) => {if(currentRound){currentRound.pointerdown(event);}});
 document.onkeyup = function(evt){if(currentRound) currentRound.keyup(evt);};
 async function joingame(name, room){
 	myName = name.value;
@@ -45,7 +76,7 @@ function startgame(params){
 	if(currentRound){
 		currentRound.die();
 	}
-	currentRound = new TronRound(ctx, params.seed, players, myName, params.aicount);
+	currentRound = new TronRound(ctx3d, params.seed, players, myName, params.aicount);
 	updateSetColor();
 }
 // joule = newton*meter
@@ -61,9 +92,10 @@ const cBoostPower = 40000; // Max boost for a one-sided grind
 const cDragExp = 2;//3 for a normal fluid
 const cRadixShift = 11; //bitshift to group locations in buckets
 class TronRound{
-	constructor(ctx, seed, players, myname, aicount){
+	constructor(ctx3d, seed, players, myname, aicount){
 		this.startmilli = performance.now();
-		this.ctx = ctx;
+		this.ctx3d = ctx3d;
+		this.cameraMode = 1;
 		this.seed = seed;
 		this.myname = myname;
 		this.playerById = players.sort();
@@ -398,8 +430,80 @@ class TronRound{
 		}
 		return turn;
 	}
+	draw3d(){
+		let ctx3d = this.ctx3d;
+		ctx3d.clear(ctx3d.DEPTH_BUFFER_BIT | ctx3d.COLOR_BUFFER_BIT);
+		ctx3d.useProgram(wallProg.prog);
+		let pointCount = 6*(this.walls[0].length+this.walls[1].length);//+4;
+		let wallArray = new Float32Array(3*pointCount);
+		//wallArray[0] = wallArray[1] = wallArray[2] = wallArray[4] = wallArray[5] = wallArray[6] = wallArray[8] = wallArray[11] = 0;
+		//wallArray[3] = wallArray[7] = wallArray[9] = wallArray[10] = 300000;
+		for(let wi = 0; wi < this.walls[0].length; wi++){
+			let w = this.walls[0][wi];
+			let wao = wi*18;//+12;
+			// X coords
+			wallArray[wao] = wallArray[wao+3] = wallArray[wao+6] = w[1];
+			wallArray[wao+9] = wallArray[wao+12] = wallArray[wao+15] = w[2];
+			// Y coords
+			wallArray[wao+1] = wallArray[wao+4] = wallArray[wao+7] = wallArray[wao+10] = wallArray[wao+13] = wallArray[wao+16] = w[0];
+			// Z coords
+			wallArray[wao+2] = wallArray[wao+5] = wallArray[wao+11] = 20000;
+			wallArray[wao+8] = wallArray[wao+14] = wallArray[wao+17] = 0;
+		}
+		for(let wi = 0; wi < this.walls[1].length; wi++){
+			let w = this.walls[1][wi];
+			let wao = (this.walls[0].length+wi)*18;//+12;
+			// X coords
+			wallArray[wao+1] = wallArray[wao+4] = wallArray[wao+7] = w[1];
+			wallArray[wao+10] = wallArray[wao+13] = wallArray[wao+16] = w[2];
+			// X coords
+			wallArray[wao] = wallArray[wao+3] = wallArray[wao+6] = wallArray[wao+9] = wallArray[wao+12] = wallArray[wao+15] = w[0];
+			// Z coords
+			wallArray[wao+2] = wallArray[wao+5] = wallArray[wao+11] = 20000;
+			wallArray[wao+8] = wallArray[wao+14] = wallArray[wao+17] = 0;
+		}
+		
+		//let pointCount = 4;
+		//let wallArray = new Float32Array(3*pointCount);
+		//wallArray.set([400, -200, -200, 400, 200, -200, 400, -200, 200, 400, 200, 200]);
+		//wallArray.set([-200,-200,0, 200,-200,0,-200,200,0,200,200,0]);
+		ctx3d.bindBuffer(ctx3d.ARRAY_BUFFER, vbuffer);
+		ctx3d.bufferData(ctx3d.ARRAY_BUFFER, wallArray, ctx3d.STATIC_DRAW);
+		ctx3d.vertexAttribPointer(wallProg.i['i_position'], 3, ctx3d.FLOAT, false, 0, 0);
+		let myloc = this.bike[this.myplayerid];
+		let myvec = [[1,0],[0,-1],[-1,0],[0,1]][myloc.d];
+		let movemat = new Mat4();
+		let rotmat = new Mat4();
+		if(this.cameraMode == 1){
+			// Standard fly-behind
+			movemat.trans(-myloc.x, -myloc.y, -20000);
+			let downAngle = Math.PI/4;
+			let dASin = Math.sin(downAngle);
+			let dACos = Math.cos(downAngle);
+			rotmat.glhLookAtf2([myvec[0]*dACos, myvec[1]*dACos, -dASin], [myvec[0]*dASin, myvec[1]*dASin, dACos]);
+		}else if(this.cameraMode == 2){
+			// In-cab first-person
+			movemat.trans(-myloc.x, -myloc.y, -2000);
+			rotmat.glhLookAtf2([myvec[0], myvec[1], 0], [0, 0, 1]);
+		}else if(this.cameraMode == 3){
+			// Bird's eye top down
+			movemat.trans(-150000,-150000,-200000);
+			rotmat.glhLookAtf2([0, 0, -1], [0, 1, 0]);
+		}else{
+			console.warn("unknown camera mode", this.cameraMode);
+		}
+
+		let viewmat = new Mat4();
+		viewmat.mult(lbike_cam_lens);
+		viewmat.mult(rotmat);
+		viewmat.mult(movemat);
+		ctx3d.uniformMatrix4fv(wallProg.i['u_view_mat'], false, viewmat.arr);
+		
+		ctx3d.drawArrays(ctx3d.TRIANGLE_STRIP, 0, pointCount);
+	}
 	draw(){
 		let ctx = this.ctx;
+
 		ctx.fillStyle="#000000";
 		ctx.strokeStyle="#00FF00";
 		// determine everyone's color
@@ -411,6 +515,7 @@ class TronRound{
 		for(let aiId = 0; aiId < this.ai.length; aiId++){
 			pcolor.push("#FF0000");
 		}
+		
 		// Adjust view matrix
 		ctx.resetTransform();
 		ctx.fillRect(0, 0, canv.width, canv.height);
@@ -551,8 +656,10 @@ class TronRound{
 		}
 		performance.mark('cend');
 		performance.measure('compute', 'cstart', 'cend');
-		this.draw();
-
+		// console.log('Walls:',(this.walls[0].length+this.walls[1].length));
+		//console.log(this.bike[0].x, this.bike[0].y);
+		//this.draw();
+		this.draw3d();
 		if(this.run) window.requestAnimationFrame(this.drawframe.bind(this));
 	}
 	async sendInput(frame, i){
@@ -582,13 +689,24 @@ class TronRound{
 			}else break;
 		}
 	}
+	cycleCamera(setto=0){
+		if(setto == 0){
+			this.cameraMode++;
+			if(this.cameraMode > 3){
+				this.cameraMode = 1;
+			}
+		}else{
+			this.cameraMode = setto;
+		}
+		console.log("Set Camera Mode:", this.cameraMode);
+	}
 	pointerdown(evt){
 		let f = this.getFrame();
 		let xp = evt.offsetX;
-		if(xp < this.ctx.canvas.width/2){
-			this.sendInput(f, 1);
-		}else{
+		if(xp < this.ctx3d.canvas.width/2){
 			this.sendInput(f, -1);
+		}else{
+			this.sendInput(f, 1);
 		}
 	}
 	keyup(evt){
@@ -596,9 +714,15 @@ class TronRound{
 	keydown(evt){
 		let f = this.getFrame();
 		if(evt.keyCode == 37){
-			this.sendInput(f, 1);
-		}else if(evt.keyCode == 39){
 			this.sendInput(f, -1);
+		}else if(evt.keyCode == 39){
+			this.sendInput(f, 1);
+		}else if(evt.keyCode >= 49 && evt.keyCode <= 51){
+			// Camera set mode 1 through 3.
+			this.cycleCamera(evt.keyCode-48);
+		}else if(evt.keyCode == 67){
+			// Cycle to next camera mode.
+			this.cycleCamera();
 		}
 	}
 }
