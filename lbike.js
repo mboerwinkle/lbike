@@ -10,22 +10,26 @@ const colorpicker = document.getElementById('colorpicker');
 but_start.disabled = true;
 const lbike_wall_frag = `#version 300 es
 precision highp float;
+flat in vec4 o_color;
 out vec4 fragColor;
 void main(){
-	fragColor = vec4(1.0,1.0,1.0,1.0);
+	fragColor = o_color;
 }`;
 const lbike_vert = `#version 300 es
 precision highp float;
 uniform mat4 u_view_mat;
 in vec3 i_position;
+in vec4 i_color;
+flat out vec4 o_color;
 void main(){
 	gl_Position = u_view_mat * vec4(i_position, 1.0);
+	o_color = i_color;
 }`;
 const glHints = {
 	alpha: true, //Avoid alpha:false, which can be expensive (From MDN best practices)
 	stencil: false,
-	antialias: true,
-//	desynchronized: true,
+	antialias: false,
+	desynchronized: false,
 }
 const ctx3d = canv3d.getContext('webgl2', glHints);
 if(null == ctx3d){
@@ -34,14 +38,16 @@ if(null == ctx3d){
 const lbike_zplanes = new Float32Array([200, 5000000]);
 let lbike_cam_lens = new Mat4();
 lbike_cam_lens.gluPerspective(1.5, ctx3d.canvas.width/ctx3d.canvas.height, lbike_zplanes[0], lbike_zplanes[1]);//vfov was 1.22
-let vbuffer = ctx3d.createBuffer();//Create and bind vertex/normal buffer
+let vbuffer = ctx3d.createBuffer();
+let vibuffer = ctx3d.createBuffer();
 ctx3d.viewport(0, 0, ctx3d.canvas.width, ctx3d.canvas.height);//FIXME this line shouldnt be copied anywhere
-ctx3d.disable(ctx3d.DEPTH_TEST);
+ctx3d.enable(ctx3d.DEPTH_TEST);
 ctx3d.disable(ctx3d.CULL_FACE);
 ctx3d.clearColor(0,0.5,0.5,1);
-const wallProg = new WGLProg(ctx3d, lbike_vert, lbike_wall_frag, ['u_view_mat'], ['i_position']);
+const wallProg = new WGLProg(ctx3d, lbike_vert, lbike_wall_frag, ['u_view_mat'], ['i_position','i_color']);
 if(wallProg.inError()) console.warn("wallProg failed to build");
 var myColor = '#00ff00';
+var cameraMode = 1;
 document.onkeydown = function(evt){if(currentRound) currentRound.keydown(evt);};
 canv3d.addEventListener("pointerdown", (event) => {if(currentRound){currentRound.pointerdown(event);}});
 document.onkeyup = function(evt){if(currentRound) currentRound.keyup(evt);};
@@ -95,7 +101,6 @@ class TronRound{
 	constructor(ctx3d, seed, players, myname, aicount){
 		this.startmilli = performance.now();
 		this.ctx3d = ctx3d;
-		this.cameraMode = 1;
 		this.seed = seed;
 		this.myname = myname;
 		this.playerById = players.sort();
@@ -430,67 +435,118 @@ class TronRound{
 		}
 		return turn;
 	}
+	colorToInt(c, dv, offset){
+		if(c[0] == '#') c = c.substring(1);
+		if(c.length < 6){
+			c = c[0]+'0'+c[1]+'0'+c[2]+'0';
+		}else if(c.length > 6){
+			c = c.substring(0, 6);
+		}
+		let v = (parseInt(c, 16)<<8)|0xff;
+		dv.setUint32(offset, v);
+	}
 	draw3d(){
+		// determine everyone's color
+		let pcolora = new ArrayBuffer(4*(1+this.playerById.length+this.ai.length))
+		let pcolor = new Uint32Array(pcolora);
+		let pcolord = new DataView(pcolora);
+		this.colorToInt('efecb3', pcolord, 0);
+		for(let peerId = 0; peerId < this.playerById.length; peerId++){
+			//console.log(this.bike[peerId].s);
+			this.colorToInt(peers[this.playerById[peerId]].color, pcolord, 4*(1+peerId));
+		}
+		for(let aiId = 0; aiId < this.ai.length; aiId++){
+			this.colorToInt('FF0000', pcolord, 4*(1+this.playerById.length+aiId));
+		}
 		let ctx3d = this.ctx3d;
 		ctx3d.clear(ctx3d.DEPTH_BUFFER_BIT | ctx3d.COLOR_BUFFER_BIT);
 		ctx3d.useProgram(wallProg.prog);
-		let pointCount = 6*(this.walls[0].length+this.walls[1].length);//+4;
-		let wallArray = new Float32Array(3*pointCount);
-		//wallArray[0] = wallArray[1] = wallArray[2] = wallArray[4] = wallArray[5] = wallArray[6] = wallArray[8] = wallArray[11] = 0;
-		//wallArray[3] = wallArray[7] = wallArray[9] = wallArray[10] = 300000;
+		let wallHeight = 2000;
+		let wallCount = this.walls[0].length+this.walls[1].length;
+		let pointCount = 4*wallCount;//+4;
+		let wallArrayBuf = new ArrayBuffer(4*4*pointCount);//three coords and one ui32 (split into colors) per point. 4 bytes per.
+		let wallArray = new Float32Array(wallArrayBuf);
+		let wallArrayi = new Uint32Array(wallArrayBuf);
+		let idxArray = new Uint16Array(6*wallCount);//six indices to make a quad
+		let topIdxArray = new Uint16Array(2*wallCount);//two indices to draw the top of a wall in line mode
 		for(let wi = 0; wi < this.walls[0].length; wi++){
 			let w = this.walls[0][wi];
-			let wao = wi*18;//+12;
+			let wao = wi*16;
+			let wio = wi*6;
+			let witlo = wi*2;
 			// X coords
-			wallArray[wao] = wallArray[wao+3] = wallArray[wao+6] = w[1];
-			wallArray[wao+9] = wallArray[wao+12] = wallArray[wao+15] = w[2];
+			wallArray[wao] = wallArray[wao+4] = w[1];
+			wallArray[wao+8] = wallArray[wao+12] = w[2];
 			// Y coords
-			wallArray[wao+1] = wallArray[wao+4] = wallArray[wao+7] = wallArray[wao+10] = wallArray[wao+13] = wallArray[wao+16] = w[0];
+			wallArray[wao+1] = wallArray[wao+5] = wallArray[wao+9] = wallArray[wao+13] = w[0];
 			// Z coords
-			wallArray[wao+2] = wallArray[wao+5] = wallArray[wao+11] = 20000;
-			wallArray[wao+8] = wallArray[wao+14] = wallArray[wao+17] = 0;
+			wallArray[wao+2] = wallArray[wao+10] = wallHeight;
+			wallArray[wao+6] = wallArray[wao+14] = 0;
+			// Colors
+			wallArrayi[wao+3] = wallArrayi[wao+7] = wallArrayi[wao+11] = wallArrayi[wao+15] = pcolor[w[3]+1];
+			// Element indices
+			idxArray[wio] = wi*4;
+			idxArray[wio+5] = idxArray[wio+1] = wi*4+1;
+			idxArray[wio+4] = idxArray[wio+2] = wi*4+2;
+			idxArray[wio+3] = wi*4+3;
+			// Top Line
+			topIdxArray[witlo] = wi*4;
+			topIdxArray[witlo+1] = wi*4+2;
 		}
-		for(let wi = 0; wi < this.walls[1].length; wi++){
-			let w = this.walls[1][wi];
-			let wao = (this.walls[0].length+wi)*18;//+12;
+		for(let wi2 = 0; wi2 < this.walls[1].length; wi2++){
+			let w = this.walls[1][wi2];
+			let wi = wi2+this.walls[0].length;
+			let wao = wi*16;
+			let wio = wi*6;
+			let witlo = wi*2;
 			// X coords
-			wallArray[wao+1] = wallArray[wao+4] = wallArray[wao+7] = w[1];
-			wallArray[wao+10] = wallArray[wao+13] = wallArray[wao+16] = w[2];
-			// X coords
-			wallArray[wao] = wallArray[wao+3] = wallArray[wao+6] = wallArray[wao+9] = wallArray[wao+12] = wallArray[wao+15] = w[0];
+			wallArray[wao+1] = wallArray[wao+5] = w[1];
+			wallArray[wao+9] = wallArray[wao+13] = w[2];
+			// Y coords
+			wallArray[wao] = wallArray[wao+4] = wallArray[wao+8] = wallArray[wao+12] = w[0];
 			// Z coords
-			wallArray[wao+2] = wallArray[wao+5] = wallArray[wao+11] = 20000;
-			wallArray[wao+8] = wallArray[wao+14] = wallArray[wao+17] = 0;
+			wallArray[wao+2] = wallArray[wao+10] = wallHeight;
+			wallArray[wao+6] = wallArray[wao+14] = 0;
+			// Colors
+			wallArrayi[wao+3] = wallArrayi[wao+7] = wallArrayi[wao+11] = wallArrayi[wao+15] = pcolor[w[3]+1];
+			// Element indices
+			idxArray[wio] = wi*4;
+			idxArray[wio+5] = idxArray[wio+1] = wi*4+1;
+			idxArray[wio+4] = idxArray[wio+2] = wi*4+2;
+			idxArray[wio+3] = wi*4+3;
+			// Top Line
+			topIdxArray[witlo] = wi*4;
+			topIdxArray[witlo+1] = wi*4+2;
 		}
-		
-		//let pointCount = 4;
-		//let wallArray = new Float32Array(3*pointCount);
-		//wallArray.set([400, -200, -200, 400, 200, -200, 400, -200, 200, 400, 200, 200]);
-		//wallArray.set([-200,-200,0, 200,-200,0,-200,200,0,200,200,0]);
 		ctx3d.bindBuffer(ctx3d.ARRAY_BUFFER, vbuffer);
-		ctx3d.bufferData(ctx3d.ARRAY_BUFFER, wallArray, ctx3d.STATIC_DRAW);
-		ctx3d.vertexAttribPointer(wallProg.i['i_position'], 3, ctx3d.FLOAT, false, 0, 0);
+		ctx3d.bufferData(ctx3d.ARRAY_BUFFER, wallArray, ctx3d.STREAM_DRAW, 0);
+		ctx3d.bindBuffer(ctx3d.ELEMENT_ARRAY_BUFFER, vibuffer);
+		ctx3d.bufferData(ctx3d.ELEMENT_ARRAY_BUFFER, idxArray, ctx3d.STREAM_DRAW, 0);
+		ctx3d.vertexAttribPointer(wallProg.i['i_position'], 3, ctx3d.FLOAT, false, 16, 0);
+		ctx3d.vertexAttribPointer(wallProg.i['i_color'], 4, ctx3d.UNSIGNED_BYTE, true, 16, 12);
 		let myloc = this.bike[this.myplayerid];
 		let myvec = [[1,0],[0,-1],[-1,0],[0,1]][myloc.d];
 		let movemat = new Mat4();
 		let rotmat = new Mat4();
-		if(this.cameraMode == 1){
+		let drawTris = true;
+		if(cameraMode == 1){
 			// Standard fly-behind
-			movemat.trans(-myloc.x, -myloc.y, -20000);
+			movemat.trans(-myloc.x+myvec[0]*10000, -myloc.y+myvec[1]*10000, -20000);
 			let downAngle = Math.PI/4;
 			let dASin = Math.sin(downAngle);
 			let dACos = Math.cos(downAngle);
 			rotmat.glhLookAtf2([myvec[0]*dACos, myvec[1]*dACos, -dASin], [myvec[0]*dASin, myvec[1]*dASin, dACos]);
-		}else if(this.cameraMode == 2){
+		}else if(cameraMode == 2){
 			// In-cab first-person
 			movemat.trans(-myloc.x, -myloc.y, -2000);
 			rotmat.glhLookAtf2([myvec[0], myvec[1], 0], [0, 0, 1]);
-		}else if(this.cameraMode == 3){
+		}else if(cameraMode == 3){
 			// Bird's eye top down
+			drawTris = false;
 			movemat.trans(-150000,-150000,-200000);
 			rotmat.glhLookAtf2([0, 0, -1], [0, 1, 0]);
 		}else{
-			console.warn("unknown camera mode", this.cameraMode);
+			console.warn("unknown camera mode", cameraMode);
 		}
 
 		let viewmat = new Mat4();
@@ -498,8 +554,11 @@ class TronRound{
 		viewmat.mult(rotmat);
 		viewmat.mult(movemat);
 		ctx3d.uniformMatrix4fv(wallProg.i['u_view_mat'], false, viewmat.arr);
-		
-		ctx3d.drawArrays(ctx3d.TRIANGLE_STRIP, 0, pointCount);
+		if(drawTris){
+			ctx3d.drawElements(ctx3d.TRIANGLES, 6*wallCount, ctx3d.UNSIGNED_SHORT, 0);
+		}
+		ctx3d.bufferData(ctx3d.ELEMENT_ARRAY_BUFFER, topIdxArray, ctx3d.STREAM_DRAW, 0);
+		ctx3d.drawElements(ctx3d.LINES, 2*wallCount, ctx3d.UNSIGNED_SHORT, 0);
 	}
 	draw(){
 		let ctx = this.ctx;
@@ -691,14 +750,14 @@ class TronRound{
 	}
 	cycleCamera(setto=0){
 		if(setto == 0){
-			this.cameraMode++;
-			if(this.cameraMode > 3){
-				this.cameraMode = 1;
+			cameraMode++;
+			if(cameraMode > 3){
+				cameraMode = 1;
 			}
 		}else{
-			this.cameraMode = setto;
+			cameraMode = setto;
 		}
-		console.log("Set Camera Mode:", this.cameraMode);
+		console.log("Set Camera Mode:", cameraMode);
 	}
 	pointerdown(evt){
 		let f = this.getFrame();
