@@ -5,6 +5,7 @@ var rtcgroup = null;
 
 const canv3d = document.getElementById('lbike-canv3d');
 const statfield = document.getElementById('lbike-status');
+const instructions = document.getElementById('instructions');
 const but_start = document.getElementById('lbike-start');
 const colorpicker = document.getElementById('colorpicker');
 but_start.disabled = true;
@@ -48,6 +49,17 @@ const wallProg = new WGLProg(ctx3d, lbike_vert, lbike_wall_frag, ['u_view_mat'],
 if(wallProg.inError()) console.warn("wallProg failed to build");
 var myColor = '#00ff00';
 var cameraMode = 1;
+function cycleCamera(setto=0){
+	if(setto == 0){
+		cameraMode++;
+		if(cameraMode > 3){
+			cameraMode = 1;
+		}
+	}else{
+		cameraMode = setto;
+	}
+	console.log("Set Camera Mode:", cameraMode);
+}
 document.onkeydown = function(evt){if(currentRound) currentRound.keydown(evt);};
 canv3d.addEventListener("pointerdown", (event) => {if(currentRound){currentRound.pointerdown(event);}});
 document.onkeyup = function(evt){if(currentRound) currentRound.keyup(evt);};
@@ -82,6 +94,7 @@ function startgame(params){
 	if(currentRound){
 		currentRound.die();
 	}
+	instructions.style.display = 'none';
 	currentRound = new TronRound(ctx3d, params.seed, players, myName, params.aicount);
 	updateSetColor();
 }
@@ -748,17 +761,6 @@ class TronRound{
 			}else break;
 		}
 	}
-	cycleCamera(setto=0){
-		if(setto == 0){
-			cameraMode++;
-			if(cameraMode > 3){
-				cameraMode = 1;
-			}
-		}else{
-			cameraMode = setto;
-		}
-		console.log("Set Camera Mode:", cameraMode);
-	}
 	pointerdown(evt){
 		let f = this.getFrame();
 		let xp = evt.offsetX;
@@ -778,10 +780,10 @@ class TronRound{
 			this.sendInput(f, 1);
 		}else if(evt.keyCode >= 49 && evt.keyCode <= 51){
 			// Camera set mode 1 through 3.
-			this.cycleCamera(evt.keyCode-48);
+			cycleCamera(evt.keyCode-48);
 		}else if(evt.keyCode == 67){
 			// Cycle to next camera mode.
-			this.cycleCamera();
+			cycleCamera();
 		}
 	}
 }
