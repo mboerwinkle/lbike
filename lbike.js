@@ -2,7 +2,8 @@
 var myName;
 var pool = null;
 var rtcgroup = null;
-
+const model_bike_prom = fetch('light-bike.stl').then(function(r){return r.arrayBuffer()}).then(function(b){return new STL(b)});
+var model_bike;
 const canv3d = document.getElementById('lbike-canv3d');
 const statfield = document.getElementById('lbike-status');
 const instructions = document.getElementById('instructions');
@@ -12,9 +13,10 @@ but_start.disabled = true;
 const lbike_wall_frag = `#version 300 es
 precision highp float;
 flat in vec4 o_color;
+in vec3 o_screenpos;
 out vec4 fragColor;
 void main(){
-	fragColor = o_color;
+	fragColor = vec4(o_color.xyz * (abs(normalize(fwidth(o_screenpos)).z*0.5+0.5)), 1.0);
 }`;
 const lbike_vert = `#version 300 es
 precision highp float;
@@ -22,8 +24,10 @@ uniform mat4 u_view_mat;
 in vec3 i_position;
 in vec4 i_color;
 flat out vec4 o_color;
+out vec3 o_screenpos;
 void main(){
 	gl_Position = u_view_mat * vec4(i_position, 1.0);
+	o_screenpos = i_position;
 	o_color = i_color;
 }`;
 const glHints = {
@@ -41,6 +45,7 @@ let lbike_cam_lens = new Mat4();
 lbike_cam_lens.gluPerspective(1.5, ctx3d.canvas.width/ctx3d.canvas.height, lbike_zplanes[0], lbike_zplanes[1]);//vfov was 1.22
 let vbuffer = ctx3d.createBuffer();
 let vibuffer = ctx3d.createBuffer();
+let bikevbuffer = ctx3d.createBuffer();
 ctx3d.viewport(0, 0, ctx3d.canvas.width, ctx3d.canvas.height);//FIXME this line shouldnt be copied anywhere
 ctx3d.enable(ctx3d.DEPTH_TEST);
 ctx3d.disable(ctx3d.CULL_FACE);
@@ -64,6 +69,8 @@ document.onkeydown = function(evt){if(currentRound) currentRound.keydown(evt);};
 canv3d.addEventListener("pointerdown", (event) => {if(currentRound){currentRound.pointerdown(event);}});
 document.onkeyup = function(evt){if(currentRound) currentRound.keyup(evt);};
 async function joingame(name, room){
+	model_bike = await model_bike_prom;
+	loadmodel(model_bike, ctx3d, bikevbuffer, 12000);
 	myName = name.value;
 	peers[myName] = {color:myColor};
 	if(pool) pool.leavePool();
@@ -97,6 +104,19 @@ function startgame(params){
 	instructions.style.display = 'none';
 	currentRound = new TronRound(ctx3d, params.seed, players, myName, params.aicount);
 	updateSetColor();
+}
+function loadmodel(stl, gl, glbuf, mult){
+	let ary = new ArrayBuffer(4*4*3*stl.triangle_count);
+	let aryf32 = new Float32Array(ary);
+	let aryui32 = new Uint32Array(ary);
+	stl.getTriangles().forEach(function(pt, idx){
+		aryf32[idx*4] = pt[0]*mult;
+		aryf32[idx*4+1] = pt[1]*mult;
+		aryf32[idx*4+2] = pt[2]*mult;
+		aryui32[idx*4+3] = 0xFFAAAAAA;
+	});
+	gl.bindBuffer(gl.ARRAY_BUFFER, glbuf);
+	gl.bufferData(gl.ARRAY_BUFFER, aryf32, gl.STATIC_DRAW, 0);
 }
 // joule = newton*meter
 // joule = watt*second
@@ -542,6 +562,8 @@ class TronRound{
 		let movemat = new Mat4();
 		let rotmat = new Mat4();
 		let drawTris = true;
+		let drawMyBike = true;
+		let drawOtherBikes = true;
 		if(cameraMode == 1){
 			// Standard fly-behind
 			movemat.trans(-myloc.x+myvec[0]*10000, -myloc.y+myvec[1]*10000, -20000);
@@ -551,10 +573,13 @@ class TronRound{
 			rotmat.glhLookAtf2([myvec[0]*dACos, myvec[1]*dACos, -dASin], [myvec[0]*dASin, myvec[1]*dASin, dACos]);
 		}else if(cameraMode == 2){
 			// In-cab first-person
+			drawMyBike = false;
 			movemat.trans(-myloc.x, -myloc.y, -2000);
 			rotmat.glhLookAtf2([myvec[0], myvec[1], 0], [0, 0, 1]);
 		}else if(cameraMode == 3){
 			// Bird's eye top down
+			drawMyBike = false;
+			drawOtherBikes = false;
 			drawTris = false;
 			movemat.trans(-150000,-150000,-200000);
 			rotmat.glhLookAtf2([0, 0, -1], [0, 1, 0]);
@@ -572,6 +597,12 @@ class TronRound{
 		}
 		ctx3d.bufferData(ctx3d.ELEMENT_ARRAY_BUFFER, topIdxArray, ctx3d.STREAM_DRAW, 0);
 		ctx3d.drawElements(ctx3d.LINES, 2*wallCount, ctx3d.UNSIGNED_SHORT, 0);
+		if(drawMyBike || drawOtherBikes){
+			ctx3d.bindBuffer(ctx3d.ARRAY_BUFFER, bikevbuffer);
+			ctx3d.vertexAttribPointer(wallProg.i['i_position'], 3, ctx3d.FLOAT, false, 16, 0);
+			ctx3d.vertexAttribPointer(wallProg.i['i_color'], 4, ctx3d.UNSIGNED_BYTE, true, 16, 12);
+			ctx3d.drawArrays(ctx3d.TRIANGLES, 0, model_bike.triangle_count*3);
+		}
 	}
 	draw(){
 		let ctx = this.ctx;
