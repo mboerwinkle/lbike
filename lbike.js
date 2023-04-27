@@ -16,7 +16,7 @@ flat in vec4 o_color;
 in vec3 o_screenpos;
 out vec4 fragColor;
 void main(){
-	fragColor = vec4(o_color.xyz * (abs(normalize(fwidth(o_screenpos)).z*0.5+0.5)), 1.0);
+	fragColor = vec4(o_color.xyz * (abs(normalize(fwidth(o_screenpos)).z*0.3+0.7)), 1.0);
 }`;
 const lbike_vert = `#version 300 es
 precision highp float;
@@ -495,61 +495,97 @@ class TronRound{
 		ctx3d.clear(ctx3d.DEPTH_BUFFER_BIT | ctx3d.COLOR_BUFFER_BIT);
 		ctx3d.useProgram(wallProg.prog);
 		let wallHeight = 2000;
+		let wallOff = 250;
 		let wallCount = this.walls[0].length+this.walls[1].length;
-		let pointCount = 4*wallCount;//+4;
+		let pointCount = 8*wallCount;
 		let wallArrayBuf = new ArrayBuffer(4*4*pointCount);//three coords and one ui32 (split into colors) per point. 4 bytes per.
 		let wallArray = new Float32Array(wallArrayBuf);
 		let wallArrayi = new Uint32Array(wallArrayBuf);
-		let idxArray = new Uint16Array(6*wallCount);//six indices to make a quad
-		let topIdxArray = new Uint16Array(2*wallCount);//two indices to draw the top of a wall in line mode
+		let idxArray = new Uint16Array(18*wallCount);//eighteen indices to make a wall (three quads)
 		for(let wi = 0; wi < this.walls[0].length; wi++){
 			let w = this.walls[0][wi];
-			let wao = wi*16;
-			let wio = wi*6;
-			let witlo = wi*2;
-			// X coords
-			wallArray[wao] = wallArray[wao+4] = w[1];
-			wallArray[wao+8] = wallArray[wao+12] = w[2];
-			// Y coords
-			wallArray[wao+1] = wallArray[wao+5] = wallArray[wao+9] = wallArray[wao+13] = w[0];
-			// Z coords
-			wallArray[wao+2] = wallArray[wao+10] = wallHeight;
-			wallArray[wao+6] = wallArray[wao+14] = 0;
-			// Colors
-			wallArrayi[wao+3] = wallArrayi[wao+7] = wallArrayi[wao+11] = wallArrayi[wao+15] = pcolor[w[3]+1];
+			let wao = wi*4*8;
+			let wio = wi*18;
+			for(let ci = 0; ci < 8; ci++){
+				if(ci < 4){
+					wallArray[wao+4*ci] = w[1]-wallOff; // x
+					if(ci < 2){
+						wallArray[wao+4*ci+1] = w[0]-wallOff; // y
+					}else{
+						wallArray[wao+4*ci+1] = w[0]+wallOff; // y
+					}
+					if(ci == 1 || ci == 2){// z
+						wallArray[wao+4*ci+2] = wallHeight;
+					}else{
+						wallArray[wao+4*ci+2] = 0;
+					}
+				}else{
+					wallArray[wao+4*ci] = w[2]+wallOff; // x
+					if(ci < 6){
+						wallArray[wao+4*ci+1] = w[0]-wallOff; // y
+					}else{
+						wallArray[wao+4*ci+1] = w[0]+wallOff; // y
+					}
+					if(ci == 5 || ci == 6){// z
+						wallArray[wao+4*ci+2] = wallHeight;
+					}else{
+						wallArray[wao+4*ci+2] = 0;
+					}
+				}
+				wallArrayi[wao+4*ci+3] = pcolor[w[3]+1]; // color
+			}
 			// Element indices
-			idxArray[wio] = wi*4;
-			idxArray[wio+5] = idxArray[wio+1] = wi*4+1;
-			idxArray[wio+4] = idxArray[wio+2] = wi*4+2;
-			idxArray[wio+3] = wi*4+3;
-			// Top Line
-			topIdxArray[witlo] = wi*4;
-			topIdxArray[witlo+1] = wi*4+2;
+			for(let qidx = 0; qidx < 3; qidx++){
+				let o1 = wi*8+qidx;
+				let i1 = wio+qidx*6;
+				idxArray[i1] = o1;
+				idxArray[i1+1] = idxArray[i1+5] = o1+1;
+				idxArray[i1+2] = idxArray[i1+4] = o1+4;
+				idxArray[i1+3] = o1+5;
+			}
 		}
-		for(let wi2 = 0; wi2 < this.walls[1].length; wi2++){
-			let w = this.walls[1][wi2];
-			let wi = wi2+this.walls[0].length;
-			let wao = wi*16;
-			let wio = wi*6;
-			let witlo = wi*2;
-			// X coords
-			wallArray[wao+1] = wallArray[wao+5] = w[1];
-			wallArray[wao+9] = wallArray[wao+13] = w[2];
-			// Y coords
-			wallArray[wao] = wallArray[wao+4] = wallArray[wao+8] = wallArray[wao+12] = w[0];
-			// Z coords
-			wallArray[wao+2] = wallArray[wao+10] = wallHeight;
-			wallArray[wao+6] = wallArray[wao+14] = 0;
-			// Colors
-			wallArrayi[wao+3] = wallArrayi[wao+7] = wallArrayi[wao+11] = wallArrayi[wao+15] = pcolor[w[3]+1];
+		for(let wi_ = 0; wi_ < this.walls[1].length; wi_++){
+			let w = this.walls[1][wi_];
+			let wi = wi_+this.walls[0].length;
+			let wao = wi*4*8;
+			let wio = wi*18;
+			for(let ci = 0; ci < 8; ci++){
+				if(ci < 4){
+					wallArray[wao+4*ci+1] = w[1]-wallOff; // y
+					if(ci < 2){
+						wallArray[wao+4*ci] = w[0]-wallOff; // x
+					}else{
+						wallArray[wao+4*ci] = w[0]+wallOff; // x
+					}
+					if(ci == 1 || ci == 2){// z
+						wallArray[wao+4*ci+2] = wallHeight;
+					}else{
+						wallArray[wao+4*ci+2] = 0;
+					}
+				}else{
+					wallArray[wao+4*ci+1] = w[2]+wallOff; // y
+					if(ci < 6){
+						wallArray[wao+4*ci] = w[0]-wallOff; // x
+					}else{
+						wallArray[wao+4*ci] = w[0]+wallOff; // x
+					}
+					if(ci == 5 || ci == 6){// z
+						wallArray[wao+4*ci+2] = wallHeight;
+					}else{
+						wallArray[wao+4*ci+2] = 0;
+					}
+				}
+				wallArrayi[wao+4*ci+3] = pcolor[w[3]+1]; // color
+			}
 			// Element indices
-			idxArray[wio] = wi*4;
-			idxArray[wio+5] = idxArray[wio+1] = wi*4+1;
-			idxArray[wio+4] = idxArray[wio+2] = wi*4+2;
-			idxArray[wio+3] = wi*4+3;
-			// Top Line
-			topIdxArray[witlo] = wi*4;
-			topIdxArray[witlo+1] = wi*4+2;
+			for(let qidx = 0; qidx < 3; qidx++){
+				let o1 = wi*8+qidx;
+				let i1 = wio+qidx*6;
+				idxArray[i1] = o1;
+				idxArray[i1+1] = idxArray[i1+5] = o1+1;
+				idxArray[i1+2] = idxArray[i1+4] = o1+4;
+				idxArray[i1+3] = o1+5;
+			}
 		}
 		ctx3d.bindBuffer(ctx3d.ARRAY_BUFFER, vbuffer);
 		ctx3d.bufferData(ctx3d.ARRAY_BUFFER, wallArray, ctx3d.STREAM_DRAW, 0);
@@ -561,7 +597,6 @@ class TronRound{
 		let myvec = [[1,0],[0,-1],[-1,0],[0,1]][myloc.d];
 		let movemat = new Mat4();
 		let rotmat = new Mat4();
-		let drawTris = true;
 		let drawMyBike = true;
 		let drawOtherBikes = true;
 		if(cameraMode == 1){
@@ -580,23 +615,17 @@ class TronRound{
 			// Bird's eye top down
 			drawMyBike = false;
 			drawOtherBikes = false;
-			drawTris = false;
-			movemat.trans(-150000,-150000,-200000);
+			movemat.trans(-myloc.x,-myloc.y,-80000);
 			rotmat.glhLookAtf2([0, 0, -1], [0, 1, 0]);
 		}else{
 			console.warn("unknown camera mode", cameraMode);
 		}
-
 		let viewmat = new Mat4();
 		viewmat.mult(lbike_cam_lens);
 		viewmat.mult(rotmat);
 		viewmat.mult(movemat);
 		ctx3d.uniformMatrix4fv(wallProg.i['u_view_mat'], false, viewmat.arr);
-		if(drawTris){
-			ctx3d.drawElements(ctx3d.TRIANGLES, 6*wallCount, ctx3d.UNSIGNED_SHORT, 0);
-		}
-		ctx3d.bufferData(ctx3d.ELEMENT_ARRAY_BUFFER, topIdxArray, ctx3d.STREAM_DRAW, 0);
-		ctx3d.drawElements(ctx3d.LINES, 2*wallCount, ctx3d.UNSIGNED_SHORT, 0);
+		ctx3d.drawElements(ctx3d.TRIANGLES, 18*wallCount, ctx3d.UNSIGNED_SHORT, 0);
 		if(drawMyBike || drawOtherBikes){
 			ctx3d.bindBuffer(ctx3d.ARRAY_BUFFER, bikevbuffer);
 			ctx3d.vertexAttribPointer(wallProg.i['i_position'], 3, ctx3d.FLOAT, false, 16, 0);
