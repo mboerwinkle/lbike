@@ -6,6 +6,7 @@ const model_bike_prom = fetch('light-bike.stl').then(function(r){return r.arrayB
 var model_bike;
 const canv3d = document.getElementById('lbike-canv3d');
 const statfield = document.getElementById('lbike-status');
+const peerfield = document.getElementById('lbike-peers');
 const instructions = document.getElementById('instructions');
 const but_start = document.getElementById('lbike-start');
 const colorpicker = document.getElementById('colorpicker');
@@ -30,6 +31,29 @@ void main(){
 	o_screenpos = i_position;
 	o_color = i_color;
 }`;
+const lbike_inst_vert = `#version 300 es
+precision highp float;
+uniform mat4 u_view_mat;
+in vec3 i_position;
+in vec4 i_color;
+in vec3 i_ins_offset;
+in float z_rot;
+flat out vec4 o_color;
+out vec3 o_screenpos;
+void main(){
+	// Create matrix for z_rot
+	float c = cos(z_rot);
+	float s = sin(z_rot);
+	mat4 rotate = mat4(1.0);
+	rotate[0][0] = c;
+	rotate[0][1] = s;
+	rotate[1][0] = -s;
+	rotate[1][1] = c;
+	gl_Position = u_view_mat *(vec4(i_ins_offset, 0.0) + rotate * vec4(i_position, 1.0));
+	o_screenpos = i_position;
+	o_color = i_color;
+}`;
+
 const glHints = {
 	alpha: true, //Avoid alpha:false, which can be expensive (From MDN best practices)
 	stencil: false,
@@ -46,12 +70,15 @@ lbike_cam_lens.gluPerspective(1.5, ctx3d.canvas.width/ctx3d.canvas.height, lbike
 let vbuffer = ctx3d.createBuffer();
 let vibuffer = ctx3d.createBuffer();
 let bikevbuffer = ctx3d.createBuffer();
+let bikeinsbuffer = ctx3d.createBuffer();
 ctx3d.viewport(0, 0, ctx3d.canvas.width, ctx3d.canvas.height);//FIXME this line shouldnt be copied anywhere
 ctx3d.enable(ctx3d.DEPTH_TEST);
 ctx3d.disable(ctx3d.CULL_FACE);
-ctx3d.clearColor(0,0.5,0.5,1);
+ctx3d.clearColor(0,0.2,0.2,1);
 const wallProg = new WGLProg(ctx3d, lbike_vert, lbike_wall_frag, ['u_view_mat'], ['i_position','i_color']);
 if(wallProg.inError()) console.warn("wallProg failed to build");
+const objInsProg = new WGLProg(ctx3d, lbike_inst_vert, lbike_wall_frag, ['u_view_mat'], ['i_position','i_color','i_ins_offset','z_rot']);
+if(objInsProg.inError()) console.warn("objInsProg failed to build");
 var myColor = '#00ff00';
 var cameraMode = 1;
 function cycleCamera(setto=0){
@@ -70,7 +97,7 @@ canv3d.addEventListener("pointerdown", (event) => {if(currentRound){currentRound
 document.onkeyup = function(evt){if(currentRound) currentRound.keyup(evt);};
 async function joingame(name, room){
 	model_bike = await model_bike_prom;
-	loadmodel(model_bike, ctx3d, bikevbuffer, 12000);
+	loadmodel(model_bike, ctx3d, bikevbuffer, 800);
 	myName = name.value;
 	peers[myName] = {color:myColor};
 	if(pool) pool.leavePool();
@@ -167,7 +194,7 @@ class TronRound{
 			this.nextPlayerInputIdx.push(0);
 		}
 		for(let aiidx = 0; aiidx < aicount; aiidx++){
-			let nai = {bike:this.playerById.length+aiidx, thinkTimer:0, thinkDelay:50};
+			let nai = {bike:this.playerById.length+aiidx, name:"ai", thinkTimer:0, thinkDelay:50};
 			let sl = this.generateRandomStart(nai.bike);
 			this.bike.push({x:sl.sx, y:sl.sy, d:sl.d, s:0, w1:sl.w1, w2:sl.w2, dead:false, energy:0, maxspeed:0});
 			this.ai.push(nai);
@@ -597,8 +624,6 @@ class TronRound{
 		let myvec = [[1,0],[0,-1],[-1,0],[0,1]][myloc.d];
 		let movemat = new Mat4();
 		let rotmat = new Mat4();
-		let drawMyBike = true;
-		let drawOtherBikes = true;
 		if(cameraMode == 1){
 			// Standard fly-behind
 			movemat.trans(-myloc.x+myvec[0]*10000, -myloc.y+myvec[1]*10000, -20000);
@@ -608,13 +633,10 @@ class TronRound{
 			rotmat.glhLookAtf2([myvec[0]*dACos, myvec[1]*dACos, -dASin], [myvec[0]*dASin, myvec[1]*dASin, dACos]);
 		}else if(cameraMode == 2){
 			// In-cab first-person
-			drawMyBike = false;
 			movemat.trans(-myloc.x, -myloc.y, -2000);
 			rotmat.glhLookAtf2([myvec[0], myvec[1], 0], [0, 0, 1]);
 		}else if(cameraMode == 3){
 			// Bird's eye top down
-			drawMyBike = false;
-			drawOtherBikes = false;
 			movemat.trans(-myloc.x,-myloc.y,-80000);
 			rotmat.glhLookAtf2([0, 0, -1], [0, 1, 0]);
 		}else{
@@ -626,12 +648,34 @@ class TronRound{
 		viewmat.mult(movemat);
 		ctx3d.uniformMatrix4fv(wallProg.i['u_view_mat'], false, viewmat.arr);
 		ctx3d.drawElements(ctx3d.TRIANGLES, 18*wallCount, ctx3d.UNSIGNED_SHORT, 0);
-		if(drawMyBike || drawOtherBikes){
-			ctx3d.bindBuffer(ctx3d.ARRAY_BUFFER, bikevbuffer);
-			ctx3d.vertexAttribPointer(wallProg.i['i_position'], 3, ctx3d.FLOAT, false, 16, 0);
-			ctx3d.vertexAttribPointer(wallProg.i['i_color'], 4, ctx3d.UNSIGNED_BYTE, true, 16, 12);
-			ctx3d.drawArrays(ctx3d.TRIANGLES, 0, model_bike.triangle_count*3);
+		// Draw Bikes
+		let bikeDrawCount = this.bike.length;
+		let bikeInstInfoBuf = new ArrayBuffer(4*4*bikeDrawCount);
+		let bikeInstInfo = new Float32Array(bikeInstInfoBuf);
+		for(let bidx = 0; bidx < this.bike.length; bidx++){
+			if(this.bike[bidx].dead){
+				bikeInstInfo[bidx*4] = Infinity;
+				bikeInstInfo[bidx*4+1] = Infinity;
+			}else{
+				let boff = [[1,0],[0,-1],[-1,0],[0,1]][this.bike[bidx].d];
+				bikeInstInfo[bidx*4] = this.bike[bidx].x - boff[0]*1800;
+				bikeInstInfo[bidx*4+1] = this.bike[bidx].y - boff[1]*1800;
+				bikeInstInfo[bidx*4+2] = 600;
+				bikeInstInfo[bidx*4+3] = (this.bike[bidx].d+3)*(-Math.PI/2);
+			}
 		}
+		ctx3d.useProgram(objInsProg.prog);
+		ctx3d.uniformMatrix4fv(objInsProg.i['u_view_mat'], false, viewmat.arr);
+		ctx3d.bindBuffer(ctx3d.ARRAY_BUFFER, bikevbuffer);
+		ctx3d.vertexAttribPointer(objInsProg.i['i_position'], 3, ctx3d.FLOAT, false, 16, 0);
+		ctx3d.vertexAttribPointer(objInsProg.i['i_color'], 4, ctx3d.UNSIGNED_BYTE, true, 16, 12);
+		ctx3d.bindBuffer(ctx3d.ARRAY_BUFFER, bikeinsbuffer);
+		ctx3d.bufferData(ctx3d.ARRAY_BUFFER, bikeInstInfo, ctx3d.STREAM_DRAW, 0);
+		ctx3d.vertexAttribPointer(objInsProg.i['i_ins_offset'], 3, ctx3d.FLOAT, false, 16, 0);
+		ctx3d.vertexAttribPointer(objInsProg.i['z_rot'], 1, ctx3d.FLOAT, false, 16, 12);
+		ctx3d.vertexAttribDivisor(objInsProg.i['i_ins_offset'], 1);
+		ctx3d.vertexAttribDivisor(objInsProg.i['z_rot'], 1);
+		ctx3d.drawArraysInstanced(ctx3d.TRIANGLES, 0, model_bike.triangle_count*3, bikeDrawCount);
 	}
 	draw(){
 		let ctx = this.ctx;
@@ -860,6 +904,7 @@ function onReceive(from, msg){
 	if(msg.set){
 		// Update with all of the new properties 
 		Object.assign(peers[from], msg.set);
+		drawRtcStatus();
 	}
 	if(msg.start){
 		startgame(msg);
@@ -870,12 +915,22 @@ function onReceive(from, msg){
 		}
 	}
 }
-function drawRtcStatus(stat){
-	let text = "";
-	stat.forEach((e) => {
-		text += e.name+'('+e.peers+')'+':'+e.dcstatus+'\n';
+let rtcstat = null;
+function drawRtcStatus(stat = null){
+	if(stat != null){
+		rtcstat = stat;
+	}
+	peerfield.innerHTML = '';
+	rtcstat.forEach((e) => {
+		let line = document.createElement('li');
+		line.innerText = e.name+'('+e.peers+') :'+e.dcstatus;
+		if(e.name in peers){
+			line.style.color = peers[e.name].color;
+		}else{
+			line.style.color = '#fff';
+		}
+		peerfield.appendChild(line);
 	});
-	statfield.value = text;
 }
 
 function xorshift32(x){

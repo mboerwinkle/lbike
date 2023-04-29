@@ -5,6 +5,23 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="description" content="An Armagetron-inspired multiplayer 3d light bike game. Battle against your friends or system utilities for supremacy!">
 <title>LBike</title>
+<style>
+body {
+	background-color: #111;
+}
+h1 {
+	font-family: sans-serif;
+	font-size: 14pt;
+	font-style: oblique 20deg;
+	color: #faf0fa;
+}
+.chatbox {
+	color: #fff;
+	background-color: #8888;
+	max-height:100%;
+	max-width:100%;
+}
+</style>
 </head>
 <body>
 <h1>LBIKE</h1>
@@ -37,7 +54,7 @@
 <form>
 </div>
 <div style="position:relative;background:#00a5;display:inline-block;font-size:0;">
-	<div id="instructions" style="z-index:2;position:absolute;font-size:12pt;height:80%;width:80%;left:10%;top:20%;overflow-y:auto;">
+	<div id="instructions" style="z-index:2;color:#ffffff;position:absolute;font-size:12pt;height:80%;width:80%;left:10%;top:20%;overflow-y:auto;">
 		<h2>Instructions</h2>
 		<p>Join a room with the 'Join!' button. Launch a new round with the 'Start Game' button.</p>
 		<p>You can change your color at any time.</p>
@@ -45,8 +62,11 @@
 		<p>Turn with left and right arrow keys. <em>(Mobile: Tap the left or right side of the game view.)</em></p>
 		<p>Cycle your camera style with 'c'. <em>(Mobile: Tap the Camera button in the upper right.)</em></p>
 	</div>
-	<div style="z-index:3;position:absolute;font-size:12pt;max-height:100%;max-width:100%;overflow:hidden;opacity:0.75;display:inline-block;top:5px;left:5px;">
-		<textarea id="lbike-status" cols="25" rows="4" readonly placeholder="No Status" autocomplete="off"></textarea>
+	<div style="z-index:3;position:absolute;font-size:12pt;max-height:80%;max-width:80%;display:inline-block;top:5px;left:5px;">
+		<textarea class="chatbox" id="lbike-status" cols="25" rows="4" readonly placeholder="No Status" autocomplete="off"></textarea>
+	</div>
+	<div style="z-index:2;position:absolute;font-size:12pt;display:inline-block;left:5px;bottom:5px;color:#fff;">
+		<ul id="lbike-peers"></ul>
 	</div>
 	<div style="z-index:4;position:absolute;font-size:12pt;opacity:0.75;display:inline-block;top:5px;right:5px;">
 		<button type="button" onclick="if(currentRound) cycleCamera();">
