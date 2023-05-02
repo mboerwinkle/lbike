@@ -37,13 +37,13 @@ uniform mat4 u_view_mat;
 in vec3 i_position;
 in vec4 i_color;
 in vec3 i_ins_offset;
-in float z_rot;
+in float i_ins_z_rot;
 flat out vec4 o_color;
 out vec3 o_screenpos;
 void main(){
 	// Create matrix for z_rot
-	float c = cos(z_rot);
-	float s = sin(z_rot);
+	float c = cos(i_ins_z_rot);
+	float s = sin(i_ins_z_rot);
 	mat4 rotate = mat4(1.0);
 	rotate[0][0] = c;
 	rotate[0][1] = s;
@@ -77,7 +77,7 @@ ctx3d.disable(ctx3d.CULL_FACE);
 ctx3d.clearColor(0,0.2,0.2,1);
 const wallProg = new WGLProg(ctx3d, lbike_vert, lbike_wall_frag, ['u_view_mat'], ['i_position','i_color']);
 if(wallProg.inError()) console.warn("wallProg failed to build");
-const objInsProg = new WGLProg(ctx3d, lbike_inst_vert, lbike_wall_frag, ['u_view_mat'], ['i_position','i_color','i_ins_offset','z_rot']);
+const objInsProg = new WGLProg(ctx3d, lbike_inst_vert, lbike_wall_frag, ['u_view_mat'], ['i_position','i_color','i_ins_offset','i_ins_z_rot']);
 if(objInsProg.inError()) console.warn("objInsProg failed to build");
 var myColor = '#00ff00';
 var cameraMode = 1;
@@ -521,6 +521,8 @@ class TronRound{
 		let ctx3d = this.ctx3d;
 		ctx3d.clear(ctx3d.DEPTH_BUFFER_BIT | ctx3d.COLOR_BUFFER_BIT);
 		ctx3d.useProgram(wallProg.prog);
+		ctx3d.enableVertexAttribArray(wallProg.i['i_position']);
+		ctx3d.enableVertexAttribArray(wallProg.i['i_color']);
 		let wallHeight = 2000;
 		let wallOff = 250;
 		let wallCount = this.walls[0].length+this.walls[1].length;
@@ -648,6 +650,8 @@ class TronRound{
 		viewmat.mult(movemat);
 		ctx3d.uniformMatrix4fv(wallProg.i['u_view_mat'], false, viewmat.arr);
 		ctx3d.drawElements(ctx3d.TRIANGLES, 18*wallCount, ctx3d.UNSIGNED_SHORT, 0);
+		ctx3d.disableVertexAttribArray(wallProg.i['i_position']);
+		ctx3d.disableVertexAttribArray(wallProg.i['i_color']);
 		// Draw Bikes
 		let bikeDrawCount = this.bike.length;
 		let bikeInstInfoBuf = new ArrayBuffer(4*4*bikeDrawCount);
@@ -665,6 +669,10 @@ class TronRound{
 			}
 		}
 		ctx3d.useProgram(objInsProg.prog);
+		ctx3d.enableVertexAttribArray(objInsProg.i['i_position']);
+		ctx3d.enableVertexAttribArray(objInsProg.i['i_color']);
+		ctx3d.enableVertexAttribArray(objInsProg.i['i_ins_offset']);
+		ctx3d.enableVertexAttribArray(objInsProg.i['i_ins_z_rot']);
 		ctx3d.uniformMatrix4fv(objInsProg.i['u_view_mat'], false, viewmat.arr);
 		ctx3d.bindBuffer(ctx3d.ARRAY_BUFFER, bikevbuffer);
 		ctx3d.vertexAttribPointer(objInsProg.i['i_position'], 3, ctx3d.FLOAT, false, 16, 0);
@@ -672,10 +680,16 @@ class TronRound{
 		ctx3d.bindBuffer(ctx3d.ARRAY_BUFFER, bikeinsbuffer);
 		ctx3d.bufferData(ctx3d.ARRAY_BUFFER, bikeInstInfo, ctx3d.STREAM_DRAW, 0);
 		ctx3d.vertexAttribPointer(objInsProg.i['i_ins_offset'], 3, ctx3d.FLOAT, false, 16, 0);
-		ctx3d.vertexAttribPointer(objInsProg.i['z_rot'], 1, ctx3d.FLOAT, false, 16, 12);
+		ctx3d.vertexAttribPointer(objInsProg.i['i_ins_z_rot'], 1, ctx3d.FLOAT, false, 16, 12);
 		ctx3d.vertexAttribDivisor(objInsProg.i['i_ins_offset'], 1);
-		ctx3d.vertexAttribDivisor(objInsProg.i['z_rot'], 1);
+		ctx3d.vertexAttribDivisor(objInsProg.i['i_ins_z_rot'], 1);
 		ctx3d.drawArraysInstanced(ctx3d.TRIANGLES, 0, model_bike.triangle_count*3, bikeDrawCount);
+		ctx3d.vertexAttribDivisor(objInsProg.i['i_ins_offset'], 0);
+		ctx3d.vertexAttribDivisor(objInsProg.i['i_ins_z_rot'], 0);
+		ctx3d.disableVertexAttribArray(objInsProg.i['i_position']);
+		ctx3d.disableVertexAttribArray(objInsProg.i['i_color']);
+		ctx3d.disableVertexAttribArray(objInsProg.i['i_ins_offset']);
+		ctx3d.disableVertexAttribArray(objInsProg.i['i_ins_z_rot']);
 	}
 	draw(){
 		let ctx = this.ctx;
