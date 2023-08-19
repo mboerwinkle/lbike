@@ -71,7 +71,7 @@ let vbuffer = ctx3d.createBuffer();
 let vibuffer = ctx3d.createBuffer();
 let bikevbuffer = ctx3d.createBuffer();
 let bikeinsbuffer = ctx3d.createBuffer();
-ctx3d.viewport(0, 0, ctx3d.canvas.width, ctx3d.canvas.height);//FIXME this line shouldnt be copied anywhere
+ctx3d.viewport(0, 0, ctx3d.canvas.width, ctx3d.canvas.height);
 ctx3d.enable(ctx3d.DEPTH_TEST);
 ctx3d.disable(ctx3d.CULL_FACE);
 ctx3d.clearColor(0,0.2,0.2,1);
@@ -311,7 +311,7 @@ class TronRound{
 	}
 	explode(pidx, x, y){
 		console.log(this.playerById[pidx]+" core dumped at ("+x+","+y+")");
-		this.bike[pidx].dead = true;
+		this.bike[pidx].dead = {'view':pidx};
 		const radius = 5000;
 		const radiussq = Math.pow(radius, 2);
 		this.activeExplosions.push([x,y,radius,this.frame+100,pidx]);
@@ -623,6 +623,10 @@ class TronRound{
 		ctx3d.vertexAttribPointer(wallProg.i['i_position'], 3, ctx3d.FLOAT, false, 16, 0);
 		ctx3d.vertexAttribPointer(wallProg.i['i_color'], 4, ctx3d.UNSIGNED_BYTE, true, 16, 12);
 		let myloc = this.bike[this.myplayerid];
+		if(myloc.dead != false){
+			// change my view to be based on the bike which my bike has set to view after death
+			myloc = this.bike[myloc.dead.view];
+		}
 		let myvec = [[1,0],[0,-1],[-1,0],[0,1]][myloc.d];
 		let movemat = new Mat4();
 		let rotmat = new Mat4();
@@ -657,7 +661,7 @@ class TronRound{
 		let bikeInstInfoBuf = new ArrayBuffer(4*4*bikeDrawCount);
 		let bikeInstInfo = new Float32Array(bikeInstInfoBuf);
 		for(let bidx = 0; bidx < this.bike.length; bidx++){
-			if(this.bike[bidx].dead){
+			if(this.bike[bidx].dead != false){
 				bikeInstInfo[bidx*4] = Infinity;
 				bikeInstInfo[bidx*4+1] = Infinity;
 			}else{
@@ -709,7 +713,6 @@ class TronRound{
 		// Adjust view matrix
 		ctx.resetTransform();
 		ctx.fillRect(0, 0, canv.width, canv.height);
-		let myloc = this.bike[this.myplayerid];
 		//adjust player to corner
 		ctx.transform(1,0,0,1, ctx.canvas.width/2, ctx.canvas.height*0.9);
 		ctx.scale(0.002, 0.002);
@@ -798,7 +801,6 @@ class TronRound{
 			}
 			for(let pidx = 0; pidx < this.bike.length; pidx++){
 				let ploc = this.bike[pidx];
-				if(ploc.dead == true) continue;
 				let turn = 0;
 				// Handle User stuff, if a user
 				if(pidx < this.playerById.length){
@@ -813,31 +815,59 @@ class TronRound{
 					}
 				}else{
 					// Handle AI Stuff, if an AI
-					let aiidx = pidx - this.playerById.length;
-					turn = this.runAi(aiidx, ploc);
-				}
-				if(turn != 0){
-					ploc.energy *= cTurnEnergyEfficiency;
-					let oldDir = ploc.d;
-					let newDir = (oldDir+4+turn)%4;
-					ploc.d = newDir;
-					//let oldWall = this.walls[ploc.w1][ploc.w2];
-					ploc.w1 ^= 1; //alternate horizontal and vertical
-					if(ploc.w1 == 0){
-						ploc.w2 = this.pushWall(0, [ploc.y, ploc.x, ploc.x, pidx]);
-					}else{
-						ploc.w2 = this.pushWall(1, [ploc.x, ploc.y, ploc.y, pidx]);
+					if(ploc.dead == false){
+						let aiidx = pidx - this.playerById.length;
+						turn = this.runAi(aiidx, ploc);
 					}
 				}
-				// Drag multiplier based on walls
-				let boostPower = this.getBoostPower(ploc);
+				if(turn != 0){
+					if(ploc.dead == false){
+						ploc.energy *= cTurnEnergyEfficiency;
+						let oldDir = ploc.d;
+						let newDir = (oldDir+4+turn)%4;
+						ploc.d = newDir;
+						//let oldWall = this.walls[ploc.w1][ploc.w2];
+						ploc.w1 ^= 1; //alternate horizontal and vertical
+						if(ploc.w1 == 0){
+							ploc.w2 = this.pushWall(0, [ploc.y, ploc.x, ploc.x, pidx]);
+						}else{
+							ploc.w2 = this.pushWall(1, [ploc.x, ploc.y, ploc.y, pidx]);
+						}
+					}else{
+						// Handle dead people cycling their camera
+						let aliveHumans = 0;
+						for(let bidx = 0; bidx < this.playerById.length; bidx++){
+							if(this.bike[bidx].dead == false) aliveHumans++;
+						}
+						let toffset = 1;
+						if(turn < 0) toffset = -1;
+						while(turn != 0){
+							let newview = (ploc.dead.view+toffset+this.playerById.length)%this.playerById.length;
+							if(aliveHumans > 0){
+								// Only cycle between yourself and living people
+								for(let cidx = 0; cidx < this.playerById.length; cidx++){
+									if(this.bike[newview].dead == false || newview == pidx){ // Always cycle to yourself, even if you're dead
+										break;
+									}
+									newview = (newview+toffset+this.playerById.length)%this.playerById.length;
+								}
+							}
+							ploc.dead.view = newview;
+							turn -= toffset;
+						}
+					}
+				}
+				if(ploc.dead == false){
+					// Drag multiplier based on walls
+					let boostPower = this.getBoostPower(ploc);
 
-				// Modify the user's speed
-				let netPower = cPower+boostPower-Math.pow(ploc.s, cDragExp)*cDrag;
-				ploc.energy += netPower*cFrameS;
-				ploc.s = Math.sqrt(2*ploc.energy/cMass);
-				if(ploc.s > ploc.maxspeed) ploc.maxspeed = ploc.s;
-				this.moveBike(pidx);
+					// Modify the user's speed
+					let netPower = cPower+boostPower-Math.pow(ploc.s, cDragExp)*cDrag;
+					ploc.energy += netPower*cFrameS;
+					ploc.s = Math.sqrt(2*ploc.energy/cMass);
+					if(ploc.s > ploc.maxspeed) ploc.maxspeed = ploc.s;
+					this.moveBike(pidx);
+				}
 			}
 			this.frame += 1;
 		}
