@@ -64,7 +64,7 @@ const ctx3d = canv3d.getContext('webgl2', glHints);
 if(null == ctx3d){
 	window.alert('WebGL2 required, but not available.');
 }
-const lbike_zplanes = new Float32Array([200, 5000000]);
+const lbike_zplanes = new Float32Array([500, 5000000]);
 let lbike_cam_lens = new Mat4();
 lbike_cam_lens.gluPerspective(1.5, ctx3d.canvas.width/ctx3d.canvas.height, lbike_zplanes[0], lbike_zplanes[1]);//vfov was 1.22
 let vbuffer = ctx3d.createBuffer();
@@ -169,6 +169,11 @@ class TronRound{
 			this.idByPlayer[this.playerById[pidx]] = pidx;
 		}
 		this.myplayerid = this.idByPlayer[myname];
+		// Used for a/s/z view direction overrides
+		this.overrideDir = null;
+		this.overrideTurn = null;
+		// Used for view direction interpolation
+		this.lastViewAngle = null;
 		this.playerInputs = [];
 		// Things that get snapshots
 			this.rstate = seed;
@@ -311,7 +316,7 @@ class TronRound{
 	}
 	explode(pidx, x, y){
 		console.log(this.playerById[pidx]+" core dumped at ("+x+","+y+")");
-		this.bike[pidx].dead = {'view':pidx};
+		this.bike[pidx].dead = {'view':pidx, 'when':this.frame};
 		const radius = 5000;
 		const radiussq = Math.pow(radius, 2);
 		this.activeExplosions.push([x,y,radius,this.frame+100,pidx]);
@@ -505,6 +510,22 @@ class TronRound{
 		let v = (parseInt(c, 16)<<8)|0xff;
 		dv.setUint32(offset, v);
 	}
+	unoverrideView(overrideTurn){
+		// Are we releasing the most recent override?
+		if(overrideTurn == this.overrideTurn){
+			this.overrideDir = null;
+			this.overrideTurn = null;
+		}
+	}
+	overrideView(overrideTurn){
+		let myloc = this.bike[this.myplayerid];
+		if(myloc.dead != false){
+			// change my view to be based on the bike which my bike has set to view after death
+			myloc = this.bike[myloc.dead.view];
+		}
+		this.overrideTurn = overrideTurn; // This is saved so that the view only changes if you release the latest override
+		this.overrideDir = (myloc.d+overrideTurn+4)%4; // This is saved so that the view doesn't turn if the bike itself turns during an override
+	}
 	draw3d(){
 		// determine everyone's color
 		let pcolora = new ArrayBuffer(4*(1+this.playerById.length+this.ai.length))
@@ -627,7 +648,30 @@ class TronRound{
 			// change my view to be based on the bike which my bike has set to view after death
 			myloc = this.bike[myloc.dead.view];
 		}
-		let myvec = [[1,0],[0,-1],[-1,0],[0,1]][myloc.d];
+		let lookdir = this.overrideDir;
+		if(this.overrideDir == null){
+			lookdir = myloc.d;
+		}
+		let myangle = [0, 4.712389, 3.141593, 1.570796][lookdir];
+		if(this.lastViewAngle != null){
+			let delta = myangle-this.lastViewAngle;
+			if(delta > 3.141593){
+				delta = delta-6.283185;
+			}
+			if(delta < -3.141593){
+				delta = delta+6.283185;
+			}
+			delta *= 0.35;
+			myangle = this.lastViewAngle + delta;
+			if(myangle < 0){
+				myangle += 6.283185;
+			}
+			if(myangle >= 6.283185){
+				myangle -= 6.283185;
+			}
+		}
+		this.lastViewAngle = myangle;
+		let myvec = [Math.cos(myangle), Math.sin(myangle)];
 		let movemat = new Mat4();
 		let rotmat = new Mat4();
 		if(cameraMode == 1){
@@ -810,7 +854,11 @@ class TronRound{
 						let nextInput = pinput[this.nextPlayerInputIdx[pidx]];
 						if(nextInput.frame > this.frame) break;
 						if(nextInput.frame == this.frame){
-							turn = nextInput.input;
+							// Only allow turns if you're alive, or if you died more than a second ago.
+							// This prevents issues where people think they're turning, but accidentally get cycled to post-death-view their opponent and get confused about what happened.
+							if(ploc.dead == false || (this.frame - ploc.dead.when) > 200){
+								turn = nextInput.input;
+							}
 						}
 					}
 				}else{
@@ -919,6 +967,13 @@ class TronRound{
 		}
 	}
 	keyup(evt){
+		if(evt.keyCode == 65){//a
+			this.unoverrideView(-1);
+		}else if(evt.keyCode == 83){//s
+			this.unoverrideView(1);
+		}else if(evt.keyCode == 90){//z
+			this.unoverrideView(2);
+		}
 	}
 	keydown(evt){
 		let f = this.getFrame();
@@ -929,9 +984,15 @@ class TronRound{
 		}else if(evt.keyCode >= 49 && evt.keyCode <= 51){
 			// Camera set mode 1 through 3.
 			cycleCamera(evt.keyCode-48);
-		}else if(evt.keyCode == 67){
+		}else if(evt.keyCode == 67){ //'c'
 			// Cycle to next camera mode.
 			cycleCamera();
+		}else if(evt.keyCode == 65){//a
+			this.overrideView(-1);
+		}else if(evt.keyCode == 83){//s
+			this.overrideView(1);
+		}else if(evt.keyCode == 90){//z
+			this.overrideView(2);
 		}
 	}
 }
